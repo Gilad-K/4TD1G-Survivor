@@ -30,6 +30,9 @@ tr.out td{color:var(--out)}
 tr.out .chip{opacity:.5}
 tr.lead td.rank{color:var(--gold)}
 .chip{display:inline-block;min-width:36px;text-align:center;margin-right:3px;padding:1px 5px;border-radius:5px;font-size:.82rem;font-weight:600;color:#fff}
+.chip{position:relative;width:40px;min-width:0;padding:1px 0;margin-right:8px}
+.chip sup{position:absolute;top:-9px;right:-6px;font-size:.68rem;font-weight:600;line-height:1;padding:1px 3px;border-radius:4px;background:var(--card);border:1px solid var(--line)}
+.chip.w sup{color:var(--win)}.chip.l sup{color:var(--loss)}
 .chip.w{background:var(--win)}.chip.l{background:var(--loss)}
 .tag{font-size:.78rem;color:var(--mute);margin-left:6px}
 .bar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin:12px 0;color:var(--mute);font-size:.9rem}
@@ -63,7 +66,7 @@ const ESPN_ALIAS = {WSH:"WAS"}; // ESPN abbreviation -> Sleeper abbreviation
 
 const SLEEPER = "https://api.sleeper.app/v1";
 const ESPN = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
-let view = 1, data = null;
+let view = 1, data = null, userChose = false;
 
 const $ = id => document.getElementById(id);
 const wk = leg => parseInt(leg.split(":").pop(), 10);
@@ -165,8 +168,10 @@ function render(){
     const prev = list[i - 1];
     const key = x => view === 1 ? x.streak + "|" + x.net1 : x.wins + "|" + x.net2;
     if(!prev || key(prev) !== key(r)) pos = i + 1;
-    const chips = r.games.map(g =>
-      `<span class="chip ${g.won ? "w" : "l"}" title="Week ${g.w}">${g.team || "—"}</span>`).join("");
+    const chips = r.games.map(g => {
+      const m = g.team && g.mg != null ? `<sup>${g.won ? "+" + g.mg : (g.mg ? "-" + g.mg : "0")}</sup>` : "";
+      return `<span class="chip ${g.won ? "w" : "l"}" title="Week ${g.w}">${g.team || "—"}${m}</span>`;
+    }).join("");
     const main = view === 1 ? r.streak : r.wins;
     const net = view === 1 ? r.net1 : r.net2;
     const status = r.out ? "out" : "";
@@ -203,6 +208,9 @@ async function load(){
       $("msgs").innerHTML = `<div class="warn">Scores for week ${[...missing].sort((a,b)=>a-b).join(", ")} could not be loaded, so net margins may be incomplete. Wins and streaks are still correct.</div>`;
     }
     data = build(league, rosters, users, out);
+    // Last man standing is settled when one or none players still have a live streak, or the season is over
+    const lmsDone = data.rows.filter(r => r.alive).length <= 1 || data.done >= TOTAL_WEEKS;
+    if(!userChose) view = lmsDone ? 2 : 1;
     render();
     $("stamp").textContent = "Updated " + new Date().toLocaleTimeString();
   }catch(e){
@@ -211,8 +219,8 @@ async function load(){
   }
 }
 
-$("t1").onclick = () => { view = 1; render(); };
-$("t2").onclick = () => { view = 2; render(); };
+$("t1").onclick = () => { view = 1; userChose = true; render(); };
+$("t2").onclick = () => { view = 2; userChose = true; render(); };
 $("refresh").onclick = load;
 load();
 </script>
