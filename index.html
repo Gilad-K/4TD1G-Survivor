@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4TD1G Survivor standings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef2ee;--card:#fff;--ink:#14231c;--mute:#6b7a72;--line:#d5ddd7;--green:#1f4d3a;--win:#1f7a4d;--loss:#b3402f;--gold:#c9a227;--out:#9aa59f}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1713;--card:#17221c;--ink:#e8efe9;--mute:#93a39a;--line:#2a3a31;--green:#6fcf9b;--win:#58c58b;--loss:#e77a68;--gold:#d9b73f;--out:#5d6b63}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Source Sans 3",system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:20px 14px 40px}
+h1{font:700 2.1rem/1 "Barlow Condensed",Impact,sans-serif;margin:8px 0 4px;color:var(--green)}
+.sub{color:var(--mute);margin:0 0 16px}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.tabs button{flex:1;padding:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:600 1rem "Source Sans 3",sans-serif;border-radius:8px;cursor:pointer}
+.tabs button[aria-selected=true]{background:var(--green);color:var(--bg);border-color:var(--green)}
+button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.rules{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:12px;color:var(--mute);font-size:.95rem}
+.rules b{color:var(--ink)}
+.wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:560px}
+th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-weight:600;color:var(--mute);font-size:.9rem}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+td.rank{font:700 1.3rem "Barlow Condensed",sans-serif;width:44px}
+tr.out td{color:var(--out)}
+tr.out .chip{opacity:.5}
+tr.lead td.rank{color:var(--gold)}
+.chip{display:inline-block;min-width:36px;text-align:center;margin-right:3px;padding:1px 5px;border-radius:5px;font-size:.82rem;font-weight:600;color:#fff}
+.chip.w{background:var(--win)}.chip.l{background:var(--loss)}
+.tag{font-size:.78rem;color:var(--mute);margin-left:6px}
+.bar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin:12px 0;color:var(--mute);font-size:.9rem}
+.bar button{padding:6px 12px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;cursor:pointer;font:inherit}
+.warn{background:#fff3cd;color:#5c4400;border:1px solid #e6cf7a;border-radius:8px;padding:10px 14px;margin-bottom:12px}
+.err{background:#fde8e4;color:#7a1f12;border:1px solid #e6a79c;border-radius:8px;padding:10px 14px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<main>
+<h1>4TD1G Survivor</h1>
+<p class="sub" id="sub">Loading standings…</p>
+<div id="msgs"></div>
+<div class="tabs" role="tablist">
+  <button role="tab" id="t1" aria-selected="true">Last man standing</button>
+  <button role="tab" id="t2" aria-selected="false">Season-long</button>
+</div>
+<div class="rules" id="rules"></div>
+<div class="wrap"><table id="tbl"></table></div>
+<div class="bar"><span id="stamp"></span><button id="refresh">Refresh</button></div>
+</main>
+<script>
+/* ---------- Settings ---------- */
+const LEAGUE_ID = "1402063136663613440";
+const SEASON = 2026;
+const TOTAL_WEEKS = 18;
+/* Safety net: if ESPN is unavailable, add margins by hand as "week:TEAM": points
+   (always a positive number, e.g. "3:KC": 7). Leave empty normally. */
+const MARGIN_OVERRIDES = {};
+const ESPN_ALIAS = {WSH:"WAS"}; // ESPN abbreviation -> Sleeper abbreviation
+
+const SLEEPER = "https://api.sleeper.app/v1";
+const ESPN = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
+let view = 1, data = null;
+
+const $ = id => document.getElementById(id);
+const wk = leg => parseInt(leg.split(":").pop(), 10);
+const fmt = n => (n > 0 ? "+" : "") + n;
+
+async function getJSON(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(r.status + " " + url);
+  return r.json();
+}
+
+/* margins[week][TEAM] = winning margin of that team's game (positive number) */
+async function loadMargins(weeks){
+  const out = {}, failed = [];
+  await Promise.all(weeks.map(async w => {
+    out[w] = {};
+    try{
+      const j = await getJSON(`${ESPN}?dates=${SEASON}&seasontype=2&week=${w}&limit=100`);
+      (j.events || []).forEach(ev => {
+        const comp = ev.competitions && ev.competitions[0];
+        if(!comp) return;
+        const t = comp.competitors.map(c => ({
+          abbr: ESPN_ALIAS[c.team.abbreviation] || c.team.abbreviation,
+          score: Number(c.score)
+        }));
+        if(t.length !== 2) return;
+        const diff = Math.abs(t[0].score - t[1].score);
+        t.forEach(x => out[w][x.abbr] = diff);
+      });
+      if(!Object.keys(out[w]).length) throw new Error("no games");
+    }catch(e){ failed.push(w); }
+    Object.keys(MARGIN_OVERRIDES).forEach(k => {
+      const [ww, team] = k.split(":");
+      if(+ww === w){ out[w][team] = MARGIN_OVERRIDES[k]; }
+    });
+  }));
+  return {out, failed: failed.filter(w => !weeks.every(() => false))};
+}
+
+function build(league, rosters, users, margins){
+  const names = {};
+  users.forEach(u => names[u.user_id] = u.display_name);
+  const done = wk(league.metadata.latest_report_leg_id);
+  const weeks = Array.from({length: done}, (_, i) => i + 1);
+
+  const rows = rosters.map(r => {
+    const m = r.metadata, picks = m.previous_picks || {}, pts = m.points_by_leg || {};
+    const games = weeks.map(w => {
+      const leg = "v1:regular:" + w;
+      const team = (picks[leg] || [])[0] || null;
+      const won = !!team && (pts[leg] || 0) > 0;
+      const mg = team && margins[w] && margins[w][team] != null ? margins[w][team] : (team ? null : 0);
+      return {w, team, won, mg};
+    });
+    const wins = games.filter(g => g.won).length;
+    let streak = 0;
+    while(streak < games.length && games[streak].won) streak++;
+    const alive = streak === games.length;
+    const sum = list => list.reduce((a, g) => a + (g.won ? 1 : -1) * (g.mg || 0), 0);
+    const streakGames = games.slice(0, streak + (alive ? 0 : 1)); // wins plus the loss that ended the run
+    return {
+      name: names[r.owner_id] || "Roster " + r.roster_id,
+      games, wins, streak, alive,
+      net1: sum(streakGames),
+      net2: sum(games)
+    };
+  });
+  return {rows, done, remaining: TOTAL_WEEKS - done};
+}
+
+function rank(rows, view, remaining){
+  let list;
+  if(view === 1){
+    list = [...rows].sort((a, b) => b.streak - a.streak || b.net1 - a.net1 || a.name.localeCompare(b.name));
+    list.forEach(r => r.out = !r.alive);
+  }else{
+    list = [...rows].sort((a, b) => b.wins - a.wins || b.net2 - a.net2 || a.name.localeCompare(b.name));
+    const top = list[0] ? list[0].wins : 0;
+    list.forEach(r => r.out = r.wins + remaining < top);
+  }
+  return list;
+}
+
+function render(){
+  if(!data) return;
+  const {rows, done, remaining} = data;
+  const list = rank(rows, view, remaining);
+  $("t1").setAttribute("aria-selected", view === 1);
+  $("t2").setAttribute("aria-selected", view === 2);
+  $("rules").innerHTML = view === 1
+    ? "<b>Last man standing, 500 prize.</b> Ranked by the longest winning streak from week 1. Streaks that ended in the same week are separated by net margin: the winning margins of the streak minus the margin of the loss that ended it. A missed pick counts as a loss. Greyed rows are out."
+    : "<b>Season-long, 500 prize.</b> Ranked by total wins, then by net margin: all winning margins minus all losing margins. Keep picking after a miss. Greyed rows can no longer reach the leader's win total, even with a perfect rest of the season.";
+  const head = view === 1
+    ? ["#", "Player", "Picks", "Streak", "Net margin", ""]
+    : ["#", "Player", "Picks", "Wins", "Net margin", ""];
+  let h = "<thead><tr>" + head.map((t, i) => `<th class="${i > 2 ? "n" : ""}">${t}</th>`).join("") + "</tr></thead><tbody>";
+  let pos = 0;
+  list.forEach((r, i) => {
+    const prev = list[i - 1];
+    const key = x => view === 1 ? x.streak + "|" + x.net1 : x.wins + "|" + x.net2;
+    if(!prev || key(prev) !== key(r)) pos = i + 1;
+    const chips = r.games.map(g =>
+      `<span class="chip ${g.won ? "w" : "l"}" title="Week ${g.w}">${g.team || "—"}</span>`).join("");
+    const main = view === 1 ? r.streak : r.wins;
+    const net = view === 1 ? r.net1 : r.net2;
+    const status = r.out ? "out" : "";
+    h += `<tr class="${r.out ? "out" : ""} ${pos === 1 && !r.out ? "lead" : ""}">
+      <td class="rank">${pos}</td><td>${r.name}</td><td>${chips}</td>
+      <td class="n">${main}</td><td class="n">${fmt(net)}</td><td class="n">${status}</td></tr>`;
+  });
+  $("tbl").innerHTML = h + "</tbody>";
+  $("sub").textContent = `Standings after week ${done} of ${TOTAL_WEEKS}. ${remaining} weeks to play.`;
+}
+
+async function load(){
+  $("msgs").innerHTML = "";
+  $("sub").textContent = "Loading standings…";
+  try{
+    const [league, rosters, users] = await Promise.all([
+      getJSON(`${SLEEPER}/league/${LEAGUE_ID}`),
+      getJSON(`${SLEEPER}/league/${LEAGUE_ID}/rosters`),
+      getJSON(`${SLEEPER}/league/${LEAGUE_ID}/users`)
+    ]);
+    const done = wk(league.metadata.latest_report_leg_id);
+    const weeks = Array.from({length: done}, (_, i) => i + 1);
+    const {out, failed} = await loadMargins(weeks);
+    // a week counts as failed only if some pick in it has no margin
+    const missing = new Set();
+    rosters.forEach(r => {
+      const picks = r.metadata.previous_picks || {};
+      weeks.forEach(w => {
+        const t = (picks["v1:regular:" + w] || [])[0];
+        if(t && (out[w][t] == null)) missing.add(w);
+      });
+    });
+    if(missing.size){
+      $("msgs").innerHTML = `<div class="warn">Scores for week ${[...missing].sort((a,b)=>a-b).join(", ")} could not be loaded, so net margins may be incomplete. Wins and streaks are still correct.</div>`;
+    }
+    data = build(league, rosters, users, out);
+    render();
+    $("stamp").textContent = "Updated " + new Date().toLocaleTimeString();
+  }catch(e){
+    $("sub").textContent = "";
+    $("msgs").innerHTML = `<div class="err">Could not load data from Sleeper (${e.message}). Check your connection and press Refresh.</div>`;
+  }
+}
+
+$("t1").onclick = () => { view = 1; render(); };
+$("t2").onclick = () => { view = 2; render(); };
+$("refresh").onclick = load;
+load();
+</script>
+</body>
+</html>
