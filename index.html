@@ -160,15 +160,16 @@ function render(){
     ? "<b>Last man standing, 500 prize.</b> Ranked by the longest winning streak from week 1. Streaks that ended in the same week are separated by net margin: the winning margins of the streak minus the margin of the loss that ended it. A missed pick counts as a loss. Greyed rows are out."
     : "<b>Season-long, 500 prize.</b> Ranked by total wins, then by net margin: all winning margins minus all losing margins. Keep picking after a miss. Greyed rows can no longer reach the leader's win total, even with a perfect rest of the season.";
   const head = view === 1
-    ? ["#", "Player", "Picks", "Streak", "Net margin", ""]
-    : ["#", "Player", "Picks", "Wins", "Net margin", ""];
-  let h = "<thead><tr>" + head.map((t, i) => `<th class="${i > 2 ? "n" : ""}">${t}</th>`).join("") + "</tr></thead><tbody>";
+    ? ["#", "Player", "Streak", "Net margin", "", "Picks"]
+    : ["#", "Player", "Wins", "Net margin", "", "Picks"];
+  let h = "<thead><tr>" + head.map((t, i) => `<th class="${i >= 2 && i <= 4 ? "n" : ""}">${t}</th>`).join("") + "</tr></thead><tbody>";
   let pos = 0;
   list.forEach((r, i) => {
     const prev = list[i - 1];
     const key = x => view === 1 ? x.streak + "|" + x.net1 : x.wins + "|" + x.net2;
     if(!prev || key(prev) !== key(r)) pos = i + 1;
-    const chips = r.games.map(g => {
+    const shown = view === 1 && !r.alive ? r.games.slice(0, r.streak + 1) : r.games; // Last man standing: nothing after elimination
+    const chips = shown.map(g => {
       const m = g.team && g.mg != null ? `<sup>${g.won ? "+" + g.mg : (g.mg ? "-" + g.mg : "0")}</sup>` : "";
       return `<span class="chip ${g.won ? "w" : "l"}" title="Week ${g.w}">${g.team || "—"}${m}</span>`;
     }).join("");
@@ -176,8 +177,8 @@ function render(){
     const net = view === 1 ? r.net1 : r.net2;
     const status = r.out ? "out" : "";
     h += `<tr class="${r.out ? "out" : ""} ${pos === 1 && !r.out ? "lead" : ""}">
-      <td class="rank">${pos}</td><td>${r.name}</td><td>${chips}</td>
-      <td class="n">${main}</td><td class="n">${fmt(net)}</td><td class="n">${status}</td></tr>`;
+      <td class="rank">${pos}</td><td>${r.name}</td>
+      <td class="n">${main}</td><td class="n">${fmt(net)}</td><td class="n">${status}</td><td>${chips}</td></tr>`;
   });
   $("tbl").innerHTML = h + "</tbody>";
   $("sub").textContent = `Standings after week ${done} of ${TOTAL_WEEKS}. ${remaining} weeks to play.`;
